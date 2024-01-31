@@ -27,7 +27,7 @@ async fn main() {
             ])
             .force_passed(true);
 
-    let acceptor = TcpListener::new("127.0.0.1:5800").bind().await;
+    let acceptor = TcpListener::new("192.168.100.84:5800").bind().await;
     Server::new(acceptor)
         .serve(Router::with_hoop(auth_handler).goal(index))
         .await;
@@ -78,34 +78,23 @@ fn validate(username: &str, password: &str) -> bool {
     username == "root" && password == "pwd"
 }
 
-// static LOGIN_HTML: &str = r#"<!DOCTYPE html>
-// <html>
-//     <head>
-//         <title>JWT Auth Demo</title>
-//     </head>
-//     <body>
-//         <h1>JWT Auth</h1>
-//         <form action="/" method="post">
-//         <label for="username"><b>Username</b></label>
-//         <input type="text" placeholder="Enter Username" name="username" required>
-    
-//         <label for="password"><b>Password</b></label>
-//         <input type="password" placeholder="Enter Password" name="password" required>
-    
-//         <button type="submit">Login</button>
-//     </form>
-//     </body>
-// </html>
-// "#;
+// code generator : https://developers.google.com/identity/gsi/web/tools/configurator?hl=fr
+// gérer les réponses : https://developers.google.com/identity/gsi/web/guides/handle-credential-responses-js-functions?hl=fr
+// JWT verification : https://github.com/kjur/jsrsasign/wiki/Tutorial-for-JWT-verification
+
 static LOGIN_HTML: &str = r#"<!DOCTYPE html>
 <html>
   <body>
+<script language="JavaScript" type="text/javascript"
+  src="https://kjur.github.io/jsrsasign/jsrsasign-latest-all-min.js">
+</script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <div id="g_id_onload"
     data-client_id="331442361372-f9bbnhoevkchlr0pq0ss7sd4r0g7v7j1.apps.googleusercontent.com"
-    data-context="signin"
+    data-context="use"
     data-ux_mode="popup"
-    data-login_uri="http://127.0.0.1:5800"
+    data-login_uri="https://refidweb.iut-rodez.fr/refid3/"
+    data-callback="handleCredentialResponse"
     data-auto_prompt="false">
 </div>
 
@@ -117,7 +106,32 @@ static LOGIN_HTML: &str = r#"<!DOCTYPE html>
     data-size="medium"
     data-logo_alignment="left">
 </div>
-    <div class="g_id_signin" data-type="standard"></div>
-  </body>
+<script>
+  function decodeJwtResponse(response) {
+    var sJWT = response;
+    var headerObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split(".")[0]));
+    var payloadObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split(".")[1]));
+    console.log(headerObj);
+    console.log(payloadObj);
+    console.log("==============");
+    return payloadObj;
+  }
+
+
+  function handleCredentialResponse(response) {
+     // decodeJwtResponse() is a custom function defined by you
+     // to decode the credential response.
+     const responsePayload = decodeJwtResponse(response.credential);
+
+     console.log("ID: " + responsePayload.sub);
+     console.log('Full Name: ' + responsePayload.name);
+     console.log('Given Name: ' + responsePayload.given_name);
+     console.log('Family Name: ' + responsePayload.family_name);
+     console.log("Image URL: " + responsePayload.picture);
+     console.log("Email: " + responsePayload.email);
+  }
+</script>
+
+ </body>
 </html>
 "#;
