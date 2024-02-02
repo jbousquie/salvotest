@@ -1,4 +1,6 @@
-use jsonwebtoken::{self, EncodingKey};
+use std::collections::HashMap;
+
+use jsonwebtoken::{self, decode, EncodingKey, DecodingKey, Validation, Algorithm};
 use salvo::http::{Method, StatusError};
 use salvo::jwt_auth::{ConstDecoder, QueryFinder};
 use salvo::prelude::*;
@@ -7,6 +9,29 @@ use time::{Duration, OffsetDateTime};
 
 
 const SECRET_KEY: &str = "YOUR SECRET_KEY";
+
+// https://developers.google.com/identity/gsi/web/reference/js-reference?hl=fr#CredentialResponse
+#[derive(Deserialize, Debug, Serialize)]
+struct JwtGooglePayload {
+    iss: String,
+    azp: String,
+    aud: String,
+    sub: String,
+    hd: String,
+    email: String,
+    email_verified: bool,
+    nbf: i64,
+    name: String,
+    picture: String,
+    given_name: String,
+    family_name: String,
+    locale: String,
+    iat: i64,
+    exp: i64,
+    jti: String,
+}
+
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
@@ -35,10 +60,33 @@ async fn main() {
 #[handler]
 async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyhow::Result<()> {
     if req.method() == Method::POST {
-        let (username, password) = (
-            req.form::<String>("username").await.unwrap_or_default(),
-            req.form::<String>("password").await.unwrap_or_default(),
-        );
+        let username = String::from("rootototo");
+        let password = String::from("pwd");
+        let hm: HashMap<String, String> = req.parse_body().await.unwrap();
+        let cr = hm.get("credential").unwrap();
+
+
+        // lire le payload sans clé : 
+        // https://github.com/Keats/jsonwebtoken/issues/277#issuecomment-1349610845
+        // https://docs.rs/jsonwebtoken/latest/jsonwebtoken/struct.Validation.html#structfield.validate_aud
+        // note : Google utilise RS256 et pas HS256
+        let key = DecodingKey::from_secret(&[]);
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.insecure_disable_signature_validation();
+        validation.validate_aud = false;
+
+        // Debug : pour voir les champs et types attendus dans la réponse JSON
+        // use base64::prelude::*;
+        // let parts = cr.split(".").collect::<Vec<&str>>();
+        // let pl = parts[1];
+        // let dec = BASE64_STANDARD_NO_PAD.decode(pl).unwrap();
+        // let tok = String::from_utf8(dec).unwrap();
+        // println!("{}", tok);
+
+
+        let data: jsonwebtoken::TokenData<JwtGooglePayload> = decode::<JwtGooglePayload>(cr, &key, &validation).unwrap();
+        println!("{:?}", data);
+
         if !validate(&username, &password) {
             res.render(Text::Html(LOGIN_HTML));
             return Ok(());
@@ -53,7 +101,7 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
             &claim,
             &EncodingKey::from_secret(SECRET_KEY.as_bytes()),
         )?;
-        res.render(Redirect::other(&format!("/?jwt_token={}", token)));
+        res.render(Redirect::other(&format!("/refid3/?jwt_token={}", token)));
     } else {
         match depot.jwt_auth_state() {
             JwtAuthState::Authorized => {
@@ -92,7 +140,7 @@ static LOGIN_HTML: &str = r#"<!DOCTYPE html>
     <div id="g_id_onload"
     data-client_id="331442361372-f9bbnhoevkchlr0pq0ss7sd4r0g7v7j1.apps.googleusercontent.com"
     data-context="use"
-    data-ux_mode="popup"
+    data-ux_mode="redirect"
     data-login_uri="https://refidweb.iut-rodez.fr/refid3/"
     data-callback="handleCredentialResponse"
     data-auto_prompt="false">
@@ -121,17 +169,24 @@ static LOGIN_HTML: &str = r#"<!DOCTYPE html>
   function handleCredentialResponse(response) {
      // decodeJwtResponse() is a custom function defined by you
      // to decode the credential response.
-     const responsePayload = decodeJwtResponse(response.credential);
+        const responsePayload = decodeJwtResponse(response.credential);
 
-     console.log("ID: " + responsePayload.sub);
-     console.log('Full Name: ' + responsePayload.name);
-     console.log('Given Name: ' + responsePayload.given_name);
-     console.log('Family Name: ' + responsePayload.family_name);
-     console.log("Image URL: " + responsePayload.picture);
-     console.log("Email: " + responsePayload.email);
+        var d = document.querySelector('#msg');
+        var str_id = 'ID : ' + responsePayload.sub;
+        var str_fu = 'Full Name : ' + responsePayload.name;
+        var str_gn = 'Given Name : ' + responsePayload.given_name;
+        var str_fn = 'Family Name : ' + responsePayload.family_name;
+        var str_em = 'Email : ' + responsePayload.email
+        var sp = '<div>';
+        var fp = '</div>';
+        var ep = fp + sp;
+        var str = sp + str_id + ep + str_fu + ep + str_gn + ep + str_fn + ep + str_em + fp;
+        d.innerHTML = str;
   }
 </script>
 
+  <div id="msg">
+  </div>
  </body>
 </html>
 "#;
