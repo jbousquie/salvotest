@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
-use jsonwebtoken::{self, decode, EncodingKey, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{self, decode, EncodingKey};
 use salvo::http::{Method, StatusError};
-use salvo::jwt_auth::{ConstDecoder, QueryFinder};
+use salvo::jwt_auth::{ConstDecoder, QueryFinder, Algorithm};
 use salvo::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
 
 const SECRET_KEY: &str = "YOUR SECRET_KEY";
+const DOMAIN: &str= "iut-rodez.fr";
 
 // https://developers.google.com/identity/gsi/web/reference/js-reference?hl=fr#CredentialResponse
 #[derive(Deserialize, Debug, Serialize)]
@@ -35,7 +36,11 @@ struct JwtGooglePayload {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
-    username: String,
+    google_id: String,
+    email: String,
+    name: String,
+    family_name: String,
+    given_name: String,
     exp: i64,
 }
 
@@ -48,7 +53,7 @@ async fn main() {
             .finders(vec![
                 // Box::new(HeaderFinder::new()),
                 Box::new(QueryFinder::new("jwt_token")),
-                // Box::new(CookieFinder::new("jwt_token")),
+                //Box::new(CookieFinder::new("jwt_token")),
             ])
             .force_passed(true);
 
@@ -60,18 +65,15 @@ async fn main() {
 #[handler]
 async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyhow::Result<()> {
     if req.method() == Method::POST {
-        let username = String::from("rootototo");
-        let password = String::from("pwd");
         let hm: HashMap<String, String> = req.parse_body().await.unwrap();
         let cr = hm.get("credential").unwrap();
-
 
         // lire le payload sans clé : 
         // https://github.com/Keats/jsonwebtoken/issues/277#issuecomment-1349610845
         // https://docs.rs/jsonwebtoken/latest/jsonwebtoken/struct.Validation.html#structfield.validate_aud
         // note : Google utilise RS256 et pas HS256
-        let key = DecodingKey::from_secret(&[]);
-        let mut validation = Validation::new(Algorithm::RS256);
+        let key = salvo::jwt_auth::DecodingKey::from_secret(&[]);
+        let mut validation = salvo::jwt_auth::Validation::new(Algorithm::RS256);
         validation.insecure_disable_signature_validation();
         validation.validate_aud = false;
 
@@ -83,17 +85,27 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
         // let tok = String::from_utf8(dec).unwrap();
         // println!("{}", tok);
 
+        //let jwt_google_data: jsonwebtoken::TokenData<JwtGooglePayload> = decode::<JwtGooglePayload>(cr, &key, &validation).unwrap();
 
-        let data: jsonwebtoken::TokenData<JwtGooglePayload> = decode::<JwtGooglePayload>(cr, &key, &validation).unwrap();
-        println!("{:?}", data);
+        // https://docs.rs/salvo-jwt-auth/latest/salvo_jwt_auth/index.html
+        let jwt_google_data: salvo::jwt_auth::TokenData<JwtGooglePayload> = decode::<JwtGooglePayload>(cr, &key, &validation).unwrap();
+        let google_claims = jwt_google_data.claims;
 
-        if !validate(&username, &password) {
+        let hd = google_claims.hd;
+        // Vérifie que l'utilisateur Google fait bien partie de notre domaine iut-rodez.fr
+        if &hd != DOMAIN {
             res.render(Text::Html(LOGIN_HTML));
             return Ok(());
         }
+
+
         let exp = OffsetDateTime::now_utc() + Duration::days(14);
         let claim = JwtClaims {
-            username,
+            google_id: google_claims.sub,
+            email: google_claims.email,
+            name: google_claims.name,
+            family_name: google_claims.family_name,
+            given_name: google_claims.given_name,
             exp: exp.unix_timestamp(),
         };
         let token = jsonwebtoken::encode(
@@ -107,8 +119,8 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
             JwtAuthState::Authorized => {
                 let data = depot.jwt_auth_data::<JwtClaims>().unwrap();
                 res.render(Text::Plain(format!(
-                    "Hi {}, have logged in successfully!",
-                    data.claims.username
+                    "Connecté en tant que  {} sur REFID3",
+                    data.claims.name
                 )));
             }
             JwtAuthState::Unauthorized => {
@@ -122,9 +134,7 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
     Ok(())
 }
 
-fn validate(username: &str, password: &str) -> bool {
-    username == "root" && password == "pwd"
-}
+
 
 // code generator : https://developers.google.com/identity/gsi/web/tools/configurator?hl=fr
 // gérer les réponses : https://developers.google.com/identity/gsi/web/guides/handle-credential-responses-js-functions?hl=fr
