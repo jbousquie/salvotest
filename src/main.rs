@@ -54,7 +54,7 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
         let hm: HashMap<String, String> = req.parse_body().await.unwrap();
         let cr = hm.get("credential").unwrap();
 
-        let google_claims = get_google_claims(cr);
+        let google_claims = get_google_claims(cr, GOOGLE_ID);
 
         let hd = google_claims.hd;
         // Vérifie que l'utilisateur Google fait bien partie de notre domaine iut-rodez.fr
@@ -85,7 +85,7 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
                 let data = depot.jwt_auth_data::<JwtClaims>().unwrap();
                 res.render(Text::Plain(format!(
                     "Connecté en tant que  {} sur REFID3",
-                    data.claims.name
+                    data.claims.name, 
                 )));
             }
             JwtAuthState::Unauthorized => {
