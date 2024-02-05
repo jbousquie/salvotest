@@ -1,8 +1,11 @@
+mod google_auth_jwt;
+use google_auth_jwt::google_auth_jwt::*;
+
 use std::collections::HashMap;
 
-use jsonwebtoken::{self, decode, EncodingKey};
+use jsonwebtoken::{self, EncodingKey};
 use salvo::http::{Method, StatusError};
-use salvo::jwt_auth::{ConstDecoder, QueryFinder, Algorithm};
+use salvo::jwt_auth::{ConstDecoder, QueryFinder};
 use salvo::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
@@ -10,28 +13,8 @@ use time::{Duration, OffsetDateTime};
 
 const SECRET_KEY: &str = "YOUR SECRET_KEY";
 const DOMAIN: &str= "iut-rodez.fr";
-
-// https://developers.google.com/identity/gsi/web/reference/js-reference?hl=fr#CredentialResponse
-#[derive(Deserialize, Debug, Serialize)]
-struct JwtGooglePayload {
-    iss: String,
-    azp: String,
-    aud: String,
-    sub: String,
-    hd: String,
-    email: String,
-    email_verified: bool,
-    nbf: i64,
-    name: String,
-    picture: String,
-    given_name: String,
-    family_name: String,
-    locale: String,
-    iat: i64,
-    exp: i64,
-    jti: String,
-}
-
+const GOOGLE_ID: &str = "331442361372-f9bbnhoevkchlr0pq0ss7sd4r0g7v7j1.apps.googleusercontent.com";
+const LOGIN_URL: &str = "https://refidweb.iut-rodez.fr/refid3/";
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,41 +47,23 @@ async fn main() {
 }
 #[handler]
 async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyhow::Result<()> {
+    let html_google_part = get_google_auth_html(GOOGLE_ID, LOGIN_URL);
+    let login_html = build_login_page(&html_google_part);
+    
     if req.method() == Method::POST {
         let hm: HashMap<String, String> = req.parse_body().await.unwrap();
         let cr = hm.get("credential").unwrap();
 
-        // lire le payload sans clé : 
-        // https://github.com/Keats/jsonwebtoken/issues/277#issuecomment-1349610845
-        // https://docs.rs/jsonwebtoken/latest/jsonwebtoken/struct.Validation.html#structfield.validate_aud
-        // note : Google utilise RS256 et pas HS256
-        let key = salvo::jwt_auth::DecodingKey::from_secret(&[]);
-        let mut validation = salvo::jwt_auth::Validation::new(Algorithm::RS256);
-        validation.insecure_disable_signature_validation();
-        validation.validate_aud = false;
-
-        // Debug : pour voir les champs et types attendus dans la réponse JSON
-        // use base64::prelude::*;
-        // let parts = cr.split(".").collect::<Vec<&str>>();
-        // let pl = parts[1];
-        // let dec = BASE64_STANDARD_NO_PAD.decode(pl).unwrap();
-        // let tok = String::from_utf8(dec).unwrap();
-        // println!("{}", tok);
-
-        //let jwt_google_data: jsonwebtoken::TokenData<JwtGooglePayload> = decode::<JwtGooglePayload>(cr, &key, &validation).unwrap();
-
-        // https://docs.rs/salvo-jwt-auth/latest/salvo_jwt_auth/index.html
-        let jwt_google_data: salvo::jwt_auth::TokenData<JwtGooglePayload> = decode::<JwtGooglePayload>(cr, &key, &validation).unwrap();
-        let google_claims = jwt_google_data.claims;
+        let google_claims = get_google_claims(cr);
 
         let hd = google_claims.hd;
         // Vérifie que l'utilisateur Google fait bien partie de notre domaine iut-rodez.fr
         if &hd != DOMAIN {
-            res.render(Text::Html(LOGIN_HTML));
+            res.render(Text::Html(login_html));
             return Ok(());
         }
 
-
+        // Gestion du JWT de "session" de Salvo, une fois l'auth Google validée
         let exp = OffsetDateTime::now_utc() + Duration::days(14);
         let claim = JwtClaims {
             google_id: google_claims.sub,
@@ -124,7 +89,7 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
                 )));
             }
             JwtAuthState::Unauthorized => {
-                res.render(Text::Html(LOGIN_HTML));
+                res.render(Text::Html(login_html));
             }
             JwtAuthState::Forbidden => {
                 res.render(StatusError::forbidden());
@@ -135,68 +100,49 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
 }
 
 
+// Renvoie la string de la page de login
+fn build_login_page(google_auth_part: &String) -> String {
 
-// code generator : https://developers.google.com/identity/gsi/web/tools/configurator?hl=fr
-// gérer les réponses : https://developers.google.com/identity/gsi/web/guides/handle-credential-responses-js-functions?hl=fr
-// JWT verification : https://github.com/kjur/jsrsasign/wiki/Tutorial-for-JWT-verification
+    format!("<!DOCTYPE html>
+    <html>
+    <body>
+    <script language='JavaScript' type='text/javascript'
+    src='https://kjur.github.io/jsrsasign/jsrsasign-latest-all-min.js'>
+    </script>
+    {}
+    <script>
+    function decodeJwtResponse(response) {{
+        var sJWT = response;
+        var headerObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split('.')[0]));
+        var payloadObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split('.')[1]));
+        console.log(headerObj);
+        console.log(payloadObj);
+        console.log('==============');
+        return payloadObj;
+    }}
 
-static LOGIN_HTML: &str = r#"<!DOCTYPE html>
-<html>
-  <body>
-<script language="JavaScript" type="text/javascript"
-  src="https://kjur.github.io/jsrsasign/jsrsasign-latest-all-min.js">
-</script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <div id="g_id_onload"
-    data-client_id="331442361372-f9bbnhoevkchlr0pq0ss7sd4r0g7v7j1.apps.googleusercontent.com"
-    data-context="use"
-    data-ux_mode="redirect"
-    data-login_uri="https://refidweb.iut-rodez.fr/refid3/"
-    data-callback="handleCredentialResponse"
-    data-auto_prompt="false">
-</div>
+    function handleCredentialResponse(response) {{
+        // decodeJwtResponse() is a custom function defined by you
+        // to decode the credential response.
+            const responsePayload = decodeJwtResponse(response.credential);
 
-<div class="g_id_signin"
-    data-type="standard"
-    data-shape="pill"
-    data-theme="outline"
-    data-text="signin"
-    data-size="medium"
-    data-logo_alignment="left">
-</div>
-<script>
-  function decodeJwtResponse(response) {
-    var sJWT = response;
-    var headerObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split(".")[0]));
-    var payloadObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split(".")[1]));
-    console.log(headerObj);
-    console.log(payloadObj);
-    console.log("==============");
-    return payloadObj;
-  }
+            var d = document.querySelector('#msg');
+            var str_id = 'ID : ' + responsePayload.sub;
+            var str_fu = 'Full Name : ' + responsePayload.name;
+            var str_gn = 'Given Name : ' + responsePayload.given_name;
+            var str_fn = 'Family Name : ' + responsePayload.family_name;
+            var str_em = 'Email : ' + responsePayload.email
+            var sp = '<div>';
+            var fp = '</div>';
+            var ep = fp + sp;
+            var str = sp + str_id + ep + str_fu + ep + str_gn + ep + str_fn + ep + str_em + fp;
+            d.innerHTML = str;
+    }}
+    </script>
 
-
-  function handleCredentialResponse(response) {
-     // decodeJwtResponse() is a custom function defined by you
-     // to decode the credential response.
-        const responsePayload = decodeJwtResponse(response.credential);
-
-        var d = document.querySelector('#msg');
-        var str_id = 'ID : ' + responsePayload.sub;
-        var str_fu = 'Full Name : ' + responsePayload.name;
-        var str_gn = 'Given Name : ' + responsePayload.given_name;
-        var str_fn = 'Family Name : ' + responsePayload.family_name;
-        var str_em = 'Email : ' + responsePayload.email
-        var sp = '<div>';
-        var fp = '</div>';
-        var ep = fp + sp;
-        var str = sp + str_id + ep + str_fu + ep + str_gn + ep + str_fn + ep + str_em + fp;
-        d.innerHTML = str;
-  }
-</script>
-
-  <div id="msg">
-  </div>
- </body>
-</html>
-"#;
+    <div id='msg'>
+    </div>
+    </body>
+    </html>
+    ", google_auth_part)
+}
