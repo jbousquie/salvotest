@@ -10,6 +10,8 @@ use salvo::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
+use askama::Template;
+
 
 const SECRET_KEY: &str = "YOUR SECRET_KEY";
 const DOMAIN: &str= "iut-rodez.fr";
@@ -27,6 +29,22 @@ pub struct JwtClaims {
     exp: i64,
 }
 
+#[derive(Template)]
+#[template(path = "hello.html")]
+struct HelloTemplate<'a> {
+    name: &'a str,
+}
+
+#[handler]
+async fn hello(req: &mut Request, res: &mut Response) {
+    let hello_tmpl = HelloTemplate {
+        name: req.param::<&str>("name").unwrap_or("World"),
+    };
+    res.render(Text::Html(hello_tmpl.render().unwrap()));
+}
+
+
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().init();
@@ -40,9 +58,15 @@ async fn main() {
             ])
             .force_passed(true);
 
+    let router = Router::new()
+                .push(
+                    Router::with_path("<name>").get(hello)
+                ).push(
+                    Router::with_hoop(auth_handler).goal(index)
+                );
     let acceptor = TcpListener::new("192.168.100.84:5800").bind().await;
     Server::new(acceptor)
-        .serve(Router::with_hoop(auth_handler).goal(index))
+        .serve(router)
         .await;
 }
 #[handler]
