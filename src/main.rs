@@ -7,6 +7,7 @@ use jsonwebtoken::{self, EncodingKey};
 use salvo::http::{Method, StatusError};
 use salvo::jwt_auth::{ConstDecoder, QueryFinder};
 use salvo::prelude::*;
+use salvo::serve_static::StaticDir;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
@@ -29,21 +30,18 @@ pub struct JwtClaims {
     exp: i64,
 }
 
+
 #[derive(Template)]
-#[template(path = "hello.html")]
-struct HelloTemplate<'a> {
+#[template(path = "logged.html")]
+struct LoggedTemplate<'a> {
     name: &'a str,
 }
 
-#[handler]
-async fn hello(req: &mut Request, res: &mut Response) {
-    let hello_tmpl = HelloTemplate {
-        name: req.param::<&str>("name").unwrap_or("World"),
-    };
-    res.render(Text::Html(hello_tmpl.render().unwrap()));
+#[derive(Template)]
+#[template(path = "login.html")]
+struct LoginTemplate {
+    html_google_part: String,
 }
-
-
 
 #[tokio::main]
 async fn main() {
@@ -60,19 +58,22 @@ async fn main() {
 
     let router = Router::new()
                 .push(
-                    Router::with_path("<name>").get(hello)
-                ).push(
                     Router::with_hoop(auth_handler).goal(index)
+                ).push(
+                    Router::with_path("<**path>").get(
+                        StaticDir::new(["static"]).defaults("index.html").auto_list(true)
+                    )
                 );
     let acceptor = TcpListener::new("192.168.100.84:5800").bind().await;
     Server::new(acceptor)
         .serve(router)
         .await;
 }
+
+
 #[handler]
 async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyhow::Result<()> {
-    let html_google_part = get_google_auth_html(GOOGLE_ID, LOGIN_URL);
-    let login_html = build_login_page(&html_google_part);
+
     
     if req.method() == Method::POST {
         let hm: HashMap<String, String> = req.parse_body().await.unwrap();
@@ -83,7 +84,8 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
         let hd = google_claims.hd;
         // Vérifie que l'utilisateur Google fait bien partie de notre domaine iut-rodez.fr
         if &hd != DOMAIN {
-            res.render(Text::Html(login_html));
+            let login_html = get_login_page();
+            res.render(login_html);
             return Ok(());
         }
 
@@ -107,13 +109,14 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
         match depot.jwt_auth_state() {
             JwtAuthState::Authorized => {
                 let data = depot.jwt_auth_data::<JwtClaims>().unwrap();
-                res.render(Text::Plain(format!(
-                    "Connecté en tant que  {} sur REFID3",
-                    data.claims.name, 
-                )));
+                let logged_template = LoggedTemplate {
+                    name: &data.claims.name,
+                };
+                res.render(Text::Html((logged_template).render().unwrap()) );
             }
             JwtAuthState::Unauthorized => {
-                res.render(Text::Html(login_html));
+                let login_html = get_login_page();
+                res.render(login_html);
             }
             JwtAuthState::Forbidden => {
                 res.render(StatusError::forbidden());
@@ -123,50 +126,10 @@ async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) -> anyh
     Ok(())
 }
 
-
-// Renvoie la string de la page de login
-fn build_login_page(google_auth_part: &String) -> String {
-
-    format!("<!DOCTYPE html>
-    <html>
-    <body>
-    <script language='JavaScript' type='text/javascript'
-    src='https://kjur.github.io/jsrsasign/jsrsasign-latest-all-min.js'>
-    </script>
-    {}
-    <script>
-    function decodeJwtResponse(response) {{
-        var sJWT = response;
-        var headerObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split('.')[0]));
-        var payloadObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split('.')[1]));
-        console.log(headerObj);
-        console.log(payloadObj);
-        console.log('==============');
-        return payloadObj;
-    }}
-
-    function handleCredentialResponse(response) {{
-        // decodeJwtResponse() is a custom function defined by you
-        // to decode the credential response.
-            const responsePayload = decodeJwtResponse(response.credential);
-
-            var d = document.querySelector('#msg');
-            var str_id = 'ID : ' + responsePayload.sub;
-            var str_fu = 'Full Name : ' + responsePayload.name;
-            var str_gn = 'Given Name : ' + responsePayload.given_name;
-            var str_fn = 'Family Name : ' + responsePayload.family_name;
-            var str_em = 'Email : ' + responsePayload.email
-            var sp = '<div>';
-            var fp = '</div>';
-            var ep = fp + sp;
-            var str = sp + str_id + ep + str_fu + ep + str_gn + ep + str_fn + ep + str_em + fp;
-            d.innerHTML = str;
-    }}
-    </script>
-
-    <div id='msg'>
-    </div>
-    </body>
-    </html>
-    ", google_auth_part)
+// Renvoie un Text<String> prêt pour le render de Salvo
+fn get_login_page() -> Text<String> {
+    let html_google_part = get_google_auth_html(GOOGLE_ID, LOGIN_URL);
+    let login_template = LoginTemplate{ html_google_part };
+    let login_html = Text::Html((login_template).render().unwrap());
+    return login_html; 
 }

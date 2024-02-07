@@ -1,0 +1,49 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Login Appli avec Google</title>
+        <link rel="stylesheet" href="default.css">
+    </head>
+    <body>
+        <h1>Mon appli authentifiée</h1>
+        <h2>Authentifiez vous avec votre compte Google</h2>
+        <!-- librairie KJUR uniquement pour lire le token dans le js
+        < !-- <script language='JavaScript' type='text/javascript'
+        src='https://kjur.github.io/jsrsasign/jsrsasign-latest-all-min.js'>
+        </script> -->
+        {{ html_google_part|safe }}
+        <script>
+            /*
+            function decodeJwtResponse(response) {
+                var sJWT = response;
+                var headerObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split('.')[0]));
+                var payloadObj = KJUR.jws.JWS.readSafeJSONString(b64utoutf8(sJWT.split('.')[1]));
+                console.log(headerObj);
+                console.log(payloadObj);
+                console.log('==============');
+                return payloadObj;
+            }
+
+            function handleCredentialResponse(response) {
+                // decodeJwtResponse() is a custom function defined by you
+                // to decode the credential response.
+                    const responsePayload = decodeJwtResponse(response.credential);
+
+                    var d = document.querySelector('#msg');
+                    var str_id = 'ID : ' + responsePayload.sub;
+                    var str_fu = 'Full Name : ' + responsePayload.name;
+                    var str_gn = 'Given Name : ' + responsePayload.given_name;
+                    var str_fn = 'Family Name : ' + responsePayload.family_name;
+                    var str_em = 'Email : ' + responsePayload.email
+                    var sp = '<div>';
+                    var fp = '</div>';
+                    var ep = fp + sp;
+                    var str = sp + str_id + ep + str_fu + ep + str_gn + ep + str_fn + ep + str_em + fp;
+                    d.innerHTML = str;
+            }
+            */
+        </script>
+        <div id='msg'>
+        </div>
+        </body>
+</html>
